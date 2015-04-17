@@ -211,6 +211,7 @@ try:
             ResourceExistsError, ResourceInUseError, ResourceNotFoundError
     _ = Provider.GCE
 except ImportError:
+    # TODO: use module.fail_json instead of print here
     print("failed=True " + \
         "msg='libcloud with GCE support (0.13.3+) required for this module'")
     sys.exit(1)
@@ -218,6 +219,7 @@ except ImportError:
 try:
     from ast import literal_eval
 except ImportError:
+    # TODO: use module.fail_json instead of print here
     print("failed=True " + \
         "msg='GCE module requires python's 'ast' module, python v2.6+'")
     sys.exit(1)
@@ -277,15 +279,10 @@ def create_instances(module, gce, instance_names):
         about the instances that were launched.
 
     """
-    image = module.params.get('image')
-    machine_type = module.params.get('machine_type')
-    metadata = module.params.get('metadata')
-    network = module.params.get('network')
     persistent_boot_disk = module.params.get('persistent_boot_disk')
     disks = module.params.get('disks')
     state = module.params.get('state')
     tags = module.params.get('tags')
-    zone = module.params.get('zone')
     ip_forward = module.params.get('ip_forward')
     external_ip = module.params.get('external_ip')
     disk_auto_delete = module.params.get('disk_auto_delete')
@@ -296,48 +293,6 @@ def create_instances(module, gce, instance_names):
     new_instances = []
     changed = False
 
-    lc_image = gce.ex_get_image(image)
-    lc_disks = []
-    disk_modes = []
-    for i, disk in enumerate(disks or []):
-        if isinstance(disk, dict):
-            lc_disks.append(gce.ex_get_volume(disk['name']))
-            disk_modes.append(disk['mode'])
-        else:
-            lc_disks.append(gce.ex_get_volume(disk))
-            # boot disk is implicitly READ_WRITE
-            disk_modes.append('READ_ONLY' if i > 0 else 'READ_WRITE')
-    lc_network = gce.ex_get_network(network)
-    lc_machine_type = gce.ex_get_size(machine_type)
-    lc_zone = gce.ex_get_zone(zone)
-
-    # Try to convert the user's metadata value into the format expected
-    # by GCE.  First try to ensure user has proper quoting of a
-    # dictionary-like syntax using 'literal_eval', then convert the python
-    # dict into a python list of 'key' / 'value' dicts.  Should end up
-    # with:
-    # [ {'key': key1, 'value': value1}, {'key': key2, 'value': value2}, ...]
-    if metadata:
-        try:
-            md = literal_eval(metadata)
-            if not isinstance(md, dict):
-                raise ValueError('metadata must be a dict')
-        except ValueError, e:
-            print("failed=True msg='bad metadata: %s'" % str(e))
-            sys.exit(1)
-        except SyntaxError, e:
-            print("failed=True msg='bad metadata syntax'")
-            sys.exit(1)
-
-        items = []
-        for k,v in md.items():
-            items.append({"key": k,"value": v})
-        metadata = {'items': items}
-
-    # These variables all have default values but check just in case
-    if not lc_image or not lc_network or not lc_machine_type or not lc_zone:
-        module.fail_json(msg='Missing required create instance variable',
-                changed=False)
 
     for name in instance_names:
         pd = None
@@ -423,7 +378,91 @@ def terminate_instances(module, gce, instance_names, zone_name):
             changed = True
 
     return (changed, terminated_instance_names)
+# Try to convert the user's metadata value into the format expected
+# by GCE.  First try to ensure user has proper quoting of a
+# dictionary-like syntax using 'literal_eval', then convert the python
+# dict into a python list of 'key' / 'value' dicts.  Should end up
+# with:
+# [ {'key': key1, 'value': value1}, {'key': key2, 'value': value2}, ...]
+def cleanup_metadata(metadata):
+    if metadata:
+        try:
+            md = literal_eval(metadata)
+            if not isinstance(md, dict):
+                raise ValueError('metadata must be a dict')
+        except ValueError, e:
+            # TODO: use module.fail_json instead of print here
+            print("failed=True msg='bad metadata: %s'" % str(e))
+            sys.exit(1)
+        except SyntaxError, e:
+            # TODO: use module.fail_json instead of print here
+            print("failed=True msg='bad metadata syntax'")
+            sys.exit(1)
 
+        items = []
+        for k,v in md.items():
+            items.append({"key": k,"value": v})
+
+        metadata = {'items': items}\
+    return metadata
+
+def create_instance_by_name(module, gce, name):
+    # TODO: implement using create_node
+    pass
+
+def create_instances_by_names(module, gce):
+    instance_json_data = []
+    changed = False
+    for name in module.params['instance_names']:
+        is_changed, inst_json = create_instance_by_name(module, gce, name)
+        instance_json_data.append(inst_json)
+        if is_changed:
+            changed = is_changed
+    return (changed, instance_json_data, [ i['name'] for i in instance_json_data ])
+
+def create_instances_by_count(module, gce):
+    # TODO: implement using ex_create_multiple_nodes
+    pass
+
+def get_image(gce, image_name):
+    if image_name is not None:
+        return gce.ex_get_image(image_name)
+    return None
+
+def get_network(gce, network_name):
+    if network_name is not None:
+        return gce.ex_get_network(network_name)
+    return None
+
+def get_machine_type(gce, machine_type_name):
+    if machine_type_name is not None:
+        return gce.ex_get_machine_type(machine_type_name)
+    return None
+
+def get_zone(gce, zone_name):
+    if zone_name is not None:
+        return gce.ex_get_zone(zone_name)
+    return None
+
+def create_instances(module, gce):
+    lc_image = get_image(module.params.get('image'))
+    lc_network = get_network(module.params.get('network'))
+    lc_machine_type = get_machine_type(module.params.get('machine_type'))
+    lc_zone = get_zone(module.params.get('zone'))
+
+    # These variables all have default values but check just in case
+    if None in [ lc_image, lc_network, lc_machine_type, lc_zone ]:
+        module.fail_json(msg='Missing required create instance variable',
+                changed=False)
+
+    metadata = cleanup_metadata(module.params.get('metadata'))
+
+    if 'instance_names' in module.params:
+        return create_instances_by_names(module, gce)
+    elif 'count' in module.params:
+        return create_instances_by_count(module, gce)
+
+    return create_instance_by_name(module, gce, module.params['name'])
 
 def main():
     module = AnsibleModule(
@@ -433,6 +472,7 @@ def main():
             machine_type = dict(default='n1-standard-1'),
             metadata = dict(),
             name = dict(),
+            count = dict(),
             network = dict(default='default'),
             persistent_boot_disk = dict(type='bool', default=False),
             disks = dict(type='list'),
@@ -447,40 +487,48 @@ def main():
             external_ip = dict(choices=['ephemeral', 'none'],
                     default='ephemeral'),
             disk_auto_delete = dict(type='bool', default=True),
-        )
+        ),
+        mutually_exclusive = [
+            ['name', 'instance_names'],
+            ['disks', 'disk_auto_delete'],
+            ['disks', 'persistent_boot_disk']
+        ],
+        required_together = None,
+        required_one_of = [name, instance_names]
     )
 
     gce = gce_connect(module)
 
-    image = module.params.get('image')
     instance_names = module.params.get('instance_names')
-    machine_type = module.params.get('machine_type')
-    metadata = module.params.get('metadata')
     name = module.params.get('name')
-    network = module.params.get('network')
-    persistent_boot_disk = module.params.get('persistent_boot_disk')
+    count = module.params.get('count')
     state = module.params.get('state')
-    tags = module.params.get('tags')
     zone = module.params.get('zone')
-    ip_forward = module.params.get('ip_forward')
     changed = False
 
-    inames = []
-    if isinstance(instance_names, list):
-        inames = instance_names
-    elif isinstance(instance_names, str):
-        inames = instance_names.split(',')
-    if name:
-        inames.append(name)
-    if not inames:
-        module.fail_json(msg='Must specify a "name" or "instance_names"',
-                changed=False)
     if not zone:
         module.fail_json(msg='Must specify a "zone"', changed=False)
 
     json_output = {'zone': zone}
+
+    # TODO: support deleting multiple instances with ex_destroy_multiple_nodes
+    # TODO: support deleting multiple instances by tag
+    # TODO: support one or more instances by instance ids or other
+    # identifiers
     if state in ['absent', 'deleted']:
         json_output['state'] = 'absent'
+
+        inames = []
+        if isinstance(instance_names, list):
+            inames = instance_names
+        elif isinstance(instance_names, str):
+            inames = instance_names.split(',')
+        if name:
+            inames.append(name)
+        if not inames:
+            module.fail_json(msg='Must specify a "name" or "instance_names"',
+                    changed=False)
+
         (changed, terminated_instance_names) = terminate_instances(module,
                 gce, inames, zone)
 
@@ -501,8 +549,9 @@ def main():
         elif name:
             json_output['name'] = name
 
-
     json_output['changed'] = changed
+
+    # TODO: use module.exit_json here
     print json.dumps(json_output)
     sys.exit(0)
 
