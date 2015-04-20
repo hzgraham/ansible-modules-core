@@ -286,11 +286,11 @@ class GCENodeManager(object):
         if state in ['absent', 'deleted']:
             # TODO: delete one or more instancs based on name,
             # instance_names params and current instance states
-            self.module.fail_json(msg='Not implemented yet', changed=False)
+            self.module.fail_json(msg='absent/deleted not implemented yet', changed=False)
         elif state in ['stopped']:
             # TODO: stop one or more instances  based on the
             # name, instance_names params and current instance states
-            self.module.fail_json(msg='Not implemented yet', changed=False)
+            self.module.fail_json(msg='stop not implemented yet', changed=False)
         elif state in ['running', 'active', 'present']:
             lc_image = self.get_image()
             lc_network = self.get_network()
@@ -306,32 +306,38 @@ class GCENodeManager(object):
 
             metadata = self.cleanup_metadata(self.module.params.get('metadata'))
 
-            if 'name' in self.module.params:
-                name = self.module.params['name']
+            name = self.module.params.get('name')
+            if name is not None:
+                count = self.module.params.get('count')
+                exact_count = self.module.params.get('exact_count')
 
-                if 'count' in self.module.params:
+                if count is not None:
                     # We are creating count number of instances with basename
                     # name
                     instance_count = self.module.params['count']
                     return self.create_instances_by_count(name, instance_count,
-                                                          lc_image, lc_network,
+                                                          lc_image,
+                                                          lc_machine_type,
+                                                          lc_network,
                                                           lc_zone, metadata)
 
-                elif 'exact_count' in self.module.params:
+                elif exact_count is not None:
                     exact_count = self.module.params
                     # TODO: verify exact_count vs running instances and
                     # delete/create instances as needed
-                    self.module.fail_json(msg='Not implemented yet', changed=False)
+                    self.module.fail_json(msg='exact_count not implemented yet', changed=False)
 
                 else:
                     # We are creating a single named instance
                     return self.create_instance_by_name(name, lc_image,
+                                                        lc_machine_type,
                                                         lc_network, lc_zone,
                                                         metadata)
             else:
                 # We are creating multiple named instances specified by
                 # instance_names
                 return self.create_instances_by_names(instance_names, lc_image,
+                                                      lc_machine_type,
                                                       lc_network, lc_zone,
                                                       metadata)
 
@@ -346,98 +352,136 @@ class GCENodeManager(object):
         # current method returns:
         #     { state: absent, changed: changed, zone: zone, instance_names: [] }
         #     { state: absent, changed: changed, zone: zone, name: [] }
-        module.fail_json(msg='Not implemented yet', changed=False)
+        module.fail_json(msg='delete_instances not implemented yet', changed=False)
 
     def stop_instances(self):
-        module.fail_json(msg='Not implemented yet', changed=False)
+        module.fail_json(msg='stop_instances not implemented yet', changed=False)
 
     def start_instances(self):
-        module.fail_json(msg='Not implemented yet', changed=False)
+        module.fail_json(msg='start_instances not implemented yet', changed=False)
 
-    def create_instance_by_name(self, name, lc_image, lc_network, lc_zone,
-                                metadata):
-        # should return:
-        #     { state: present, changed: changed, zone: zone, instance_data: [], name: name }
+    def create_instance_by_name(self, name, lc_image, lc_machine_type, lc_network,
+                                lc_zone, metadata):
+        changed = False
+
+        # TODO: Convert old style disk arrays to a valid ex_disks_gce_struct
+        #       - array of names
+        #       - array of dicts: { 'name': <name>, 'mode': <mode> }
+
+        disks = self.module.params.get('disks')
+        boot_disk = self.module.params.get('boot_disk')
+        disk_auto_delete = self.module.params.get('disk_auto_delete')
+        disk_type = self.module.params.get('disk_type')
+        use_existing_disk = self.module.params.get('use_existing_disk')
+        tags = self.module.params.get('tags')
+        nics = self.module.params.get('nics')
+        ip_forward = self.module.params.get('ip_forward')
+        external_ip = self.module.params.get('external_ip')
+        if external_ip == 'none':
+            external_ip = None
+
+        try:
+            inst = self.gce.create_node(
+                name, lc_machine_type, lc_image, location=lc_zone,
+                ex_network=lc_network, ex_tags=tags, ex_metadata=metadata,
+                ex_boot_disk=boot_disk, use_existing_disk=use_existing_disk,
+                external_ip=external_ip, ex_disk_type=disk_type,
+                ex_disk_auto_delete=disk_auto_delete,
+                ex_can_ip_forward=ip_forward, ex_disks_gce_struct=disks,
+                ex_nic_gce_struct=nics
+            )
+            changed = True
+        except ResourceExistsError:
+            inst = self.gce.ex_get_node(name, lc_zone)
+        except GoogleBaseError, e:
+            self.module.fail_json(
+                msg='Unexpected error attempting to create '
+                    'instance %s, error: %s' % (name, e.value)
+            )
+
         results = {
-            state: 'present',
-            changed: False,
-            zone: self.module.params['zone'],
-            instance_data: [],
-            name: []
+            'state': self.module.params.get('state'),
+            'changed': changed,
+            'zone': lc_zone.name,
+            'instance_data': [self.get_instance_info(inst)],
+            'name': name
         }
+        return results
 
-        # TODO: implement using create_node
-        self.module.fail_json(msg='Not implemented yet', changed=False)
-
-    def create_instances_by_names(self, instance_names, lc_image, lc_network,
-                                  lc_zone, metadata):
-        results = {
-            state: 'present',
-            changed: False,
-            zone: self.module.params['zone'],
-            instance_data: [],
-            instance_names: []
-        }
-
+    def create_instances_by_names(self, instance_names, lc_image,
+                                  lc_machine_type, lc_network, lc_zone,
+                                  metadata):
+        changed = False
+        instance_data=[]
+        instance_names=[]
         for name in module.params['instance_names']:
-            r = self.create_instance_by_name(name, lc_image, lc_network,
-                                                  lc_zone, metadata)
+            r = self.create_instance_by_name(name, lc_image, lc_machine_type,
+                                             lc_network, lc_zone, metadata)
             if r['changed']:
-                results['changed'] = True
-            results['instance_data'].append(r['instance_data'][0])
-            results['instance_names'].append(r['name'])
-        return (results)
+                changed = True
+            instance_data.append(r['instance_data'][0])
+            instance_names.append(r['name'])
+
+        results = {
+            'state': self.module.params.get('state'),
+            'changed': changed,
+            'zone': lc_zone.name,
+            'instance_data': instance_data,
+            'instance_names': instance_names
+        }
+        return results
 
     def create_instances_by_count(self, name, instance_count, lc_image,
-                                  lc_network, lc_zone, metadata):
+                                  lc_machine_type, lc_network, lc_zone, metadata):
         # current method returns:
         #     { state: present, changed: changed, zone: zone, instance_data, instance_names: [] }
         #     { state: present, changed: changed, zone: zone, instance_data, name: [] }
         #
         # TODO: implement using ex_create_multiple_nodes
-        self.module.fail_json(msg='Not implemented yet', changed=False)
+        self.module.fail_json(msg='create_instances_by_count not implemented yet', changed=False, parmas=self.module.params)
+
+    def get_instance_info(self, inst):
+        """Retrieves instance information from an instance object and returns it
+        as a dictionary.
+
+        """
+        metadata = {}
+        if 'metadata' in inst.extra and 'items' in inst.extra['metadata']:
+            for md in inst.extra['metadata']['items']:
+                metadata[md['key']] = md['value']
+
+        try:
+            netname = inst.extra['networkInterfaces'][0]['network'].split('/')[-1]
+        except:
+            netname = None
+        if 'disks' in inst.extra:
+            disk_names = [disk_info['source'].split('/')[-1]
+                          for disk_info
+                          in sorted(inst.extra['disks'],
+                                    key=lambda disk_info: disk_info['index'])]
+        else:
+            disk_names = []
+
+        if len(inst.public_ips) == 0:
+            public_ip = None
+        else:
+            public_ip = inst.public_ips[0]
 
 
-def get_instance_info(inst):
-    """Retrieves instance information from an instance object and returns it
-    as a dictionary.
+        return({
+            'image': inst.image is not None and inst.image.split('/')[-1] or None,
+            'disks': disk_names,
+            'machine_type': inst.size,
+            'metadata': metadata,
+            'name': inst.name,
+            'network': netname,
+            'private_ip': inst.private_ips[0],
+            'public_ip': public_ip,
+            'status': ('status' in inst.extra) and inst.extra['status'] or None,
+            'tags': ('tags' in inst.extra) and inst.extra['tags'] or [],
+            'zone': ('zone' in inst.extra) and inst.extra['zone'].name or None,
+       })
 
-    """
-    metadata = {}
-    if 'metadata' in inst.extra and 'items' in inst.extra['metadata']:
-        for md in inst.extra['metadata']['items']:
-            metadata[md['key']] = md['value']
-
-    try:
-        netname = inst.extra['networkInterfaces'][0]['network'].split('/')[-1]
-    except:
-        netname = None
-    if 'disks' in inst.extra:
-        disk_names = [disk_info['source'].split('/')[-1]
-                      for disk_info
-                      in sorted(inst.extra['disks'],
-                                key=lambda disk_info: disk_info['index'])]
-    else:
-        disk_names = []
-
-    if len(inst.public_ips) == 0:
-        public_ip = None
-    else:
-        public_ip = inst.public_ips[0]
-
-    return({
-        'image': not inst.image is None and inst.image.split('/')[-1] or None,
-        'disks': disk_names,
-        'machine_type': inst.size,
-        'metadata': metadata,
-        'name': inst.name,
-        'network': netname,
-        'private_ip': inst.private_ips[0],
-        'public_ip': public_ip,
-        'status': ('status' in inst.extra) and inst.extra['status'] or None,
-        'tags': ('tags' in inst.extra) and inst.extra['tags'] or [],
-        'zone': ('zone' in inst.extra) and inst.extra['zone'].name or None,
-   })
 
 def create_instances(module, gce, instance_names):
     """Creates new instances. Attributes other than instance_names are picked
@@ -560,15 +604,14 @@ def main():
             machine_type = dict(default='n1-standard-1'),
             metadata = dict(),
             name = dict(),
-            count = dict(type='int', default=1),
-            exact_count = dict(type='int'),
-            count_tag = dict(),
+            count = dict(type='int'),
+            exact_count = dict(type='int'), # TODO: update docs for this param
+            count_tag = dict(), # TODO: update docs for this param
             wait = dict(type='bool', default=False),
             network = dict(default='default'),
-            persistent_boot_disk = dict(type='bool', default=False),
-            disks = dict(type='list'),
+            disks = dict(type='list'), # TODO: update docs for this param
             state = dict(choices=['active', 'present', 'running', 'stopped', 'absent', 'deleted'],
-                    default='present'),
+                    default='present'), # TODO: update docs for this param
             tags = dict(type='list'),
             zone = dict(default='us-central1-a'),
             service_account_email = dict(),
@@ -577,19 +620,27 @@ def main():
             ip_forward = dict(type='bool', default=False),
             external_ip = dict(choices=['ephemeral', 'none'],
                     default='ephemeral'),
+            boot_disk = dict(), # TODO: update docs for this param
             disk_auto_delete = dict(type='bool', default=True),
+            disk_type = dict(choices=['pd-standard', 'pd-ssd'],
+                    default='pd-standard'), # TODO: update docs for this param
+            use_existing_disk = dict(type='bool', default=True), # TODO: update docs for this param
+            nics = dict(type='list') # TODO: update docs for this param
         ),
         mutually_exclusive = [
             ['name', 'instance_names'],
             ['disks', 'disk_auto_delete'],
-            ['disks', 'persistent_boot_disk'],
+            ['disks', 'boot_disk'],
+            ['disks', 'disk_type'],
+            ['disks', 'use_existing_disk'],
             ['exact_count', 'count'],
             ['exact_count', 'instance_names'],
-            ['instance_names', 'count']
+            ['instance_names', 'count'],
+            ['nics', 'external_ip'],
+            ['nics', 'network']
         ],
         required_together = [['exact_count', 'count_tag']],
         required_one_of = [['name', 'instance_names']],
-        supports_check_mode = True
     )
 
     node_mgr = GCENodeManager(module)
