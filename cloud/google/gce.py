@@ -227,42 +227,73 @@ class GCENodeManager(object):
         self.module = module
         self.gce = gce_connect(module)
 
-    def get_image(self):
-        image_name = self.module.params.get('image')
+    def get_image(self, image_name):
         if image_name is not None:
-            return self.gce.ex_get_image(image_name)
+            try:
+                return self.gce.ex_get_image(image_name)
+            except GoogleBaseError, e:
+                self.module.fail_json(
+                    msg='Unexpected error attempting to create '
+                        'instance %s, error: %s' % (name, e.value)
+                )
         return None
 
-    def get_network(self):
-        network_name = self.module.params.get('network')
+    def get_network(self, network_name):
         if network_name is not None:
-            return self.gce.ex_get_network(network_name)
+            try:
+                return self.gce.ex_get_network(network_name)
+            except GoogleBaseError, e:
+                self.module.fail_json(
+                    msg='Unexpected error attempting to get '
+                        'network %s, error: %s' % (network_name, e.value)
+                )
         return None
 
-    def get_size(self):
-        size_name = self.module.params.get('machine_type')
+    def get_size(self, size_name):
         if size_name is not None:
-            return self.gce.ex_get_size(size_name)
+            try:
+                return self.gce.ex_get_size(size_name)
+            except GoogleBaseError, e:
+                self.module.fail_json(
+                    msg='Unexpected error attempting to get '
+                        'size %s, error: %s' % (size_name, e.value)
+                )
         return None
 
-    def get_zone(self):
-        zone_name = self.module.params.get('zone')
+    def get_zone(self, zone_name):
         if zone_name is not None:
-            return self.gce.ex_get_zone(zone_name)
+            try:
+                return self.gce.ex_get_zone(zone_name)
+            except GoogleBaseError, e:
+                self.module.fail_json(
+                    msg='Unexpected error attempting to get '
+                        'zone %s, error: %s' % (zone_name, e.value)
+                )
         return None
 
-    def get_boot_disk(self):
-        name = self.module.params.get('boot_disk')
-        size = self.module.params.get('boot_disk_size')
-        auto_delete = self.module.params.get('boot_disk_auto_delete')
-        disk_type = self.module.params.get('boot_disk_type')
-        use_existing = self.module.params.get('boot_disk_use_existing')
-        zone = self.get_zone()
-        image = self.get_image()
-        snapshot = None
+    def get_disktype(self, type_name, zone):
+        if type_name is not None:
+            try:
+                return self.gce.ex_get_disktype(type_name, zone)
+            except GoogleBaseError, e:
+                self.module.fail_json(
+                    msg='Unexpected error attempting to get '
+                        'disktype %s, error: %s' % (type_name, e.value)
+                )
+        return None
+
+    def get_boot_disk(self, name, zone, image, size, auto_delete, disk_type,
+                      use_existing):
         if name is not None:
-            return self.gce.create_volume(size, name, zone, snapshot, image,
-                    use_existing, disk_type)
+            snapshot = None
+            try:
+                return self.gce.create_volume(size, name, zone, snapshot, image,
+                        use_existing, disk_type)
+            except GoogleBaseError, e:
+                self.module.fail_json(
+                    msg='Unexpected error attempting to get '
+                        'boot_disk %s, error: %s' % (name, e.value)
+                )
 
     # Try to convert the user's metadata value into the format expected
     # by GCE.  First try to ensure user has proper quoting of a
@@ -288,9 +319,21 @@ class GCENodeManager(object):
             metadata = {'items': items}
         return metadata
 
+    def expand_disk_partial_names(self, disks, zone):
+        if disks is not None:
+            for disk in disks:
+                if 'initializeParams' in disk:
+                    if 'sourceImage' in disk['initializeParams']:
+                        lc_image = self.get_image(disk['initializeParams']['sourceImage'])
+                        disk['initializeParams']['sourceImage'] = lc_image.extra['selfLink']
+                    if 'diskType' in disk['initializeParams']:
+                        lc_disktype = self.get_disktype(disk['initializeParams']['diskType'],
+                                                        zone)
+                        disk['initializeParams']['diskType'] = lc_disktype.extra['selfLink']
+
     def execute(self):
         state = self.module.params.get('state')
-        lc_zone = self.get_zone()
+        lc_zone = self.get_zone(self.module.params.get('zone'))
         name = self.module.params.get('name')
 
         instance_names = []
@@ -311,14 +354,10 @@ class GCENodeManager(object):
                 # We are deleting multiple named instances specified by
                 # instance_names
                 return self.delete_instances_by_names(instance_names, lc_zone)
-        elif state in ['stopped']:
-            # TODO: stop one or more instances  based on the
-            # name, instance_names params and current instance states
-            self.module.fail_json(msg='stop not implemented yet', changed=False)
-        elif state in ['running', 'active', 'present']:
-            lc_image = self.get_image()
-            lc_network = self.get_network()
-            lc_machine_type = self.get_size()
+        elif state in ['active', 'present']:
+            lc_image = self.get_image(self.module.params.get('image'))
+            lc_network = self.get_network(self.module.params.get('network'))
+            lc_machine_type = self.get_size(self.module.params.get('machine_type'))
 
             # These variables all have default values but check just in case
             if None in [ lc_image, lc_network, lc_machine_type, lc_zone ]:
@@ -331,7 +370,6 @@ class GCENodeManager(object):
 
             if name is not None:
                 count = self.module.params.get('count')
-                exact_count = self.module.params.get('exact_count')
 
                 if count is not None:
                     # We are creating count number of instances with basename
@@ -342,12 +380,6 @@ class GCENodeManager(object):
                                                           lc_machine_type,
                                                           lc_network,
                                                           lc_zone, metadata)
-
-                elif exact_count is not None:
-                    exact_count = self.module.params
-                    # TODO: verify exact_count vs running instances and
-                    # delete/create instances as needed
-                    self.module.fail_json(msg='exact_count not implemented yet', changed=False)
 
                 else:
                     # We are creating a single named instance
@@ -408,12 +440,6 @@ class GCENodeManager(object):
         }
         return results
 
-    def stop_instances(self):
-        module.fail_json(msg='stop_instances not implemented yet', changed=False)
-
-    def start_instances(self):
-        module.fail_json(msg='start_instances not implemented yet', changed=False)
-
     def create_instance_by_name(self, name, lc_image, lc_machine_type, lc_network,
                                 lc_zone, metadata):
         changed = False
@@ -423,10 +449,17 @@ class GCENodeManager(object):
         #       - array of dicts: { 'name': <name>, 'mode': <mode> }
 
         disks = self.module.params.get('disks')
+        self.expand_disk_partial_names(disks, lc_zone)
         boot_disk = self.module.params.get('boot_disk')
         boot_disk_auto_delete = self.module.params.get('boot_disk_auto_delete')
+        boot_disk_size = self.module.params.get('boot_disk_size')
         boot_disk_type = self.module.params.get('boot_disk_type')
         boot_disk_use_existing = self.module.params.get('boot_disk_use_existing')
+        lc_boot_disk = self.get_boot_disk(boot_disk, lc_zone, lc_image,
+                                          boot_disk_size,
+                                          boot_disk_auto_delete,
+                                          boot_disk_type,
+                                          boot_disk_use_existing)
         tags = self.module.params.get('tags')
         nics = self.module.params.get('nics')
         ip_forward = self.module.params.get('ip_forward')
@@ -438,7 +471,7 @@ class GCENodeManager(object):
             inst = self.gce.create_node(
                 name, lc_machine_type, lc_image, location=lc_zone,
                 ex_network=lc_network, ex_tags=tags, ex_metadata=metadata,
-                ex_boot_disk=self.get_boot_disk(),
+                ex_boot_disk=lc_boot_disk,
                 use_existing_disk=boot_disk_use_existing,
                 external_ip=external_ip, ex_disk_type=boot_disk_type,
                 ex_disk_auto_delete=boot_disk_auto_delete,
@@ -510,11 +543,17 @@ class GCENodeManager(object):
         except:
             netname = None
         if 'disks' in inst.extra:
-            disk_names = [disk_info['source'].split('/')[-1]
-                          for disk_info
-                          in sorted(inst.extra['disks'],
-                                    key=lambda disk_info: disk_info['index'])]
+            sorted_disks = sorted(inst.extra['disks'],
+                                  key=lambda disk_info: disk_info['index'])
+            disk_info = sorted_disks
+            disk_names = []
+            for disk_info in sorted_disks:
+                if 'source' in disk_info:
+                    disk_names.append(disk_info['source'].split('/')[-1])
+                else:
+                    disk_names.append('scratch')
         else:
+            disk_info = []
             disk_names = []
 
         if len(inst.public_ips) == 0:
@@ -546,13 +585,10 @@ def main():
             machine_type = dict(default='n1-standard-1'),
             metadata = dict(),
             name = dict(),
-            count = dict(type='int'),
-            exact_count = dict(type='int'), # TODO: update docs for this param
-            count_tag = dict(), # TODO: update docs for this param
-            wait = dict(type='bool', default=False),
+            count = dict(type='int'), # TODO: implment and document
             network = dict(default='default'),
             disks = dict(type='list'), # TODO: update docs for this param
-            state = dict(choices=['active', 'present', 'running', 'stopped', 'absent', 'deleted'],
+            state = dict(choices=['active', 'present', 'absent', 'deleted'],
                     default='present'), # TODO: update docs for this param
             tags = dict(type='list'),
             zone = dict(default='us-central1-a'),
@@ -578,13 +614,11 @@ def main():
             ['disks', 'boot_disk_size'],
             ['disks', 'boot_disk_type'],
             ['disks', 'boot_disk_use_existing'],
-            ['exact_count', 'count'],
-            ['exact_count', 'instance_names'],
-            ['instance_names', 'count'],
+            ['count', 'instance_names'],
+            ['count', 'boot_disk'],
             ['nics', 'external_ip'],
             ['nics', 'network']
         ],
-        required_together = [['exact_count', 'count_tag']],
         required_one_of = [['name', 'instance_names']],
     )
 
