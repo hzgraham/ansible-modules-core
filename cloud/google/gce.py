@@ -147,17 +147,17 @@ EXAMPLES = '''
 # Basic provisioning example.  Create a single Debian 7 instance in the
 # us-central1-a Zone of n1-standard-1 machine type.
 - local_action:
-    module: gce
-    name: test-instance
-    zone: us-central1-a
-    machine_type: n1-standard-1
-    image: debian-7
+    gce:
+      name: test-instance
+      zone: us-central1-a
+      machine_type: n1-standard-1
+      image: debian-7
 
 # Example using defaults and with metadata to create a single 'foo' instance
 - local_action:
-    module: gce
-    name: foo
-    metadata: '{"db":"postgres", "group":"qa", "id":500}'
+    gce:
+      name: foo
+      metadata: '{"db":"postgres", "group":"qa", "id":500}'
 
 
 # Launch instances from a control node, runs some tasks on the new instances,
@@ -174,13 +174,13 @@ EXAMPLES = '''
     project_id: project-id
   tasks:
     - name: Launch instances
-      local_action: gce instance_names={{names}} machine_type={{machine_type}}
-                    image={{image}} zone={{zone}} service_account_email={{ service_account_email }}
-                    pem_file={{ pem_file }} project_id={{ project_id }}
+      gce: instance_names={{names}} machine_type={{machine_type}}
+           image={{image}} zone={{zone}} service_account_email={{ service_account_email }}
+           pem_file={{ pem_file }} project_id={{ project_id }}
       register: gce
     - name: Wait for SSH to come up
-      local_action: wait_for host={{item.public_ip}} port=22 delay=10
-                    timeout=60 state=started
+      wait_for: host={{item.public_ip}} port=22 delay=10
+                timeout=60 state=started
       with_items: {{gce.instance_data}}
 
 - name: Configure instance(s)
@@ -195,8 +195,7 @@ EXAMPLES = '''
   connection: local
   tasks:
     - name: Terminate instances that were previously launched
-      local_action:
-        module: gce
+      gce:
         state: 'absent'
         instance_names: {{gce.instance_names}}
 
@@ -251,6 +250,19 @@ class GCENodeManager(object):
         if zone_name is not None:
             return self.gce.ex_get_zone(zone_name)
         return None
+
+    def get_boot_disk(self):
+        name = self.module.params.get('boot_disk')
+        size = self.module.params.get('boot_disk_size')
+        auto_delete = self.module.params.get('boot_disk_auto_delete')
+        disk_type = self.module.params.get('boot_disk_type')
+        use_existing = self.module.params.get('boot_disk_use_existing')
+        zone = self.get_zone()
+        image = self.get_image()
+        snapshot = None
+        if name is not None:
+            return self.gce.create_volume(size, name, zone, snapshot, image,
+                    use_existing, disk_type)
 
     # Try to convert the user's metadata value into the format expected
     # by GCE.  First try to ensure user has proper quoting of a
@@ -412,9 +424,9 @@ class GCENodeManager(object):
 
         disks = self.module.params.get('disks')
         boot_disk = self.module.params.get('boot_disk')
-        disk_auto_delete = self.module.params.get('disk_auto_delete')
-        disk_type = self.module.params.get('disk_type')
-        use_existing_disk = self.module.params.get('use_existing_disk')
+        boot_disk_auto_delete = self.module.params.get('boot_disk_auto_delete')
+        boot_disk_type = self.module.params.get('boot_disk_type')
+        boot_disk_use_existing = self.module.params.get('boot_disk_use_existing')
         tags = self.module.params.get('tags')
         nics = self.module.params.get('nics')
         ip_forward = self.module.params.get('ip_forward')
@@ -426,9 +438,10 @@ class GCENodeManager(object):
             inst = self.gce.create_node(
                 name, lc_machine_type, lc_image, location=lc_zone,
                 ex_network=lc_network, ex_tags=tags, ex_metadata=metadata,
-                ex_boot_disk=boot_disk, use_existing_disk=use_existing_disk,
-                external_ip=external_ip, ex_disk_type=disk_type,
-                ex_disk_auto_delete=disk_auto_delete,
+                ex_boot_disk=self.get_boot_disk(),
+                use_existing_disk=boot_disk_use_existing,
+                external_ip=external_ip, ex_disk_type=boot_disk_type,
+                ex_disk_auto_delete=boot_disk_auto_delete,
                 ex_can_ip_forward=ip_forward, ex_disks_gce_struct=disks,
                 ex_nic_gce_struct=nics
             )
@@ -550,18 +563,21 @@ def main():
             external_ip = dict(choices=['ephemeral', 'none'],
                     default='ephemeral'),
             boot_disk = dict(), # TODO: update docs for this param
-            disk_auto_delete = dict(type='bool', default=True),
-            disk_type = dict(choices=['pd-standard', 'pd-ssd'],
+            boot_disk_size = dict(), # TODO: update docs for this param
+            boot_disk_auto_delete = dict(type='bool', default=True,
+                    aliases=['disk_auto_delete']),
+            boot_disk_type = dict(choices=['pd-standard', 'pd-ssd'],
                     default='pd-standard'), # TODO: update docs for this param
-            use_existing_disk = dict(type='bool', default=True), # TODO: update docs for this param
+            boot_disk_use_existing = dict(type='bool', default=True), # TODO: update docs for this param
             nics = dict(type='list') # TODO: update docs for this param
         ),
         mutually_exclusive = [
             ['name', 'instance_names'],
-            ['disks', 'disk_auto_delete'],
+            ['disks', 'boot_disk_auto_delete'],
             ['disks', 'boot_disk'],
-            ['disks', 'disk_type'],
-            ['disks', 'use_existing_disk'],
+            ['disks', 'boot_disk_size'],
+            ['disks', 'boot_disk_type'],
+            ['disks', 'boot_disk_use_existing'],
             ['exact_count', 'count'],
             ['exact_count', 'instance_names'],
             ['instance_names', 'count'],
