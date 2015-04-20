@@ -224,13 +224,8 @@ except ImportError:
 
 class GCENodeManager(object):
     def __init__(self, module):
-
         self.validate_params(module.params)
-
         self.module = module
-        self.zone = module.params.get('zone')
-        self.transaction_summary = {'zone': self.zone}
-
         self.gce = gce_connect(module)
 
     def get_image(self):
@@ -283,10 +278,27 @@ class GCENodeManager(object):
 
     def execute(self):
         state = self.module.params.get('state')
+        lc_zone = self.get_zone()
+        name = self.module.params.get('name')
+
+        instance_names = []
+        param_inames = self.module.params.get('instance_names')
+        if isinstance(param_inames, list):
+            instance_names = param_inames
+        elif isinstance(param_inames, str):
+            instance_names = [n.strip() for n in param_inames.split(',')]
+
         if state in ['absent', 'deleted']:
-            # TODO: delete one or more instancs based on name,
-            # instance_names params and current instance states
-            self.module.fail_json(msg='absent/deleted not implemented yet', changed=False)
+            # TODO: support deleting multiple instances with ex_destroy_multiple_nodes
+            # TODO: support deleting multiple instances by tag
+            # TODO: support one or more instances by instance ids or other
+            if name is not None:
+                # We are deleting a single named instance
+                return self.delete_instance_by_name(name, lc_zone)
+            else:
+                # We are deleting multiple named instances specified by
+                # instance_names
+                return self.delete_instances_by_names(instance_names, lc_zone)
         elif state in ['stopped']:
             # TODO: stop one or more instances  based on the
             # name, instance_names params and current instance states
@@ -295,7 +307,6 @@ class GCENodeManager(object):
             lc_image = self.get_image()
             lc_network = self.get_network()
             lc_machine_type = self.get_size()
-            lc_zone = self.get_zone()
 
             # These variables all have default values but check just in case
             if None in [ lc_image, lc_network, lc_machine_type, lc_zone ]:
@@ -306,7 +317,6 @@ class GCENodeManager(object):
 
             metadata = self.cleanup_metadata(self.module.params.get('metadata'))
 
-            name = self.module.params.get('name')
             if name is not None:
                 count = self.module.params.get('count')
                 exact_count = self.module.params.get('exact_count')
@@ -345,14 +355,46 @@ class GCENodeManager(object):
         if 'zone' not in params:
             self.module.fail_json(msg='Must specify a "zone"', changed=False)
 
-    def delete_instances(self):
-        # TODO: support deleting multiple instances with ex_destroy_multiple_nodes
-        # TODO: support deleting multiple instances by tag
-        # TODO: support one or more instances by instance ids or other
-        # current method returns:
-        #     { state: absent, changed: changed, zone: zone, instance_names: [] }
-        #     { state: absent, changed: changed, zone: zone, name: [] }
-        module.fail_json(msg='delete_instances not implemented yet', changed=False)
+    def delete_instance_by_name(self, name, lc_zone):
+        changed = False
+        inst = None
+        try:
+            inst = self.gce.ex_get_node(name, lc_zone)
+        except ResourceNotFoundError:
+            pass
+        except Exception, e:
+             self.module.fail_json(msg=unexpected_error_msg(e), changed=False)
+
+        if inst:
+            self.gce.destroy_node(inst)
+            changed = True
+
+        results = {
+            'state': self.module.params.get('state'),
+            'changed': changed,
+            'zone': lc_zone.name,
+            'name': name
+        }
+        return results
+
+    def delete_instances_by_names(self, instance_names, lc_zone):
+        changed = False
+
+        deleted_instances = []
+
+        for name in instance_names:
+            r = self.delete_instance_by_name(name, lc_zone)
+            if r['changed']:
+                changed = True
+                deleted_instances.append(r['name'])
+
+        results = {
+            'state': self.module.params.get('state'),
+            'changed': changed,
+            'zone': lc_zone.name,
+            'instance_names': deleted_instances
+        }
+        return results
 
     def stop_instances(self):
         module.fail_json(msg='stop_instances not implemented yet', changed=False)
@@ -412,22 +454,22 @@ class GCENodeManager(object):
                                   lc_machine_type, lc_network, lc_zone,
                                   metadata):
         changed = False
-        instance_data=[]
-        instance_names=[]
-        for name in module.params['instance_names']:
+        created_data=[]
+        created_names=[]
+        for name in instance_names:
             r = self.create_instance_by_name(name, lc_image, lc_machine_type,
                                              lc_network, lc_zone, metadata)
             if r['changed']:
                 changed = True
-            instance_data.append(r['instance_data'][0])
-            instance_names.append(r['name'])
+            created_data.append(r['instance_data'][0])
+            created_names.append(r['name'])
 
         results = {
             'state': self.module.params.get('state'),
             'changed': changed,
             'zone': lc_zone.name,
-            'instance_data': instance_data,
-            'instance_names': instance_names
+            'instance_data': created_data,
+            'instance_names': created_names
         }
         return results
 
@@ -482,119 +524,6 @@ class GCENodeManager(object):
             'zone': ('zone' in inst.extra) and inst.extra['zone'].name or None,
        })
 
-
-def create_instances(module, gce, instance_names):
-    """Creates new instances. Attributes other than instance_names are picked
-    up from 'module'
-
-    module : AnsibleModule object
-    gce: authenticated GCE libcloud driver
-    instance_names: python list of instance names to create
-
-    Returns:
-        A list of dictionaries with instance information
-        about the instances that were launched.
-
-    """
-    persistent_boot_disk = module.params.get('persistent_boot_disk')
-    disks = module.params.get('disks')
-    state = module.params.get('state')
-    tags = module.params.get('tags')
-    ip_forward = module.params.get('ip_forward')
-    external_ip = module.params.get('external_ip')
-    disk_auto_delete = module.params.get('disk_auto_delete')
-
-    if external_ip == "none":
-        external_ip = None
-
-    new_instances = []
-    changed = False
-
-
-    for name in instance_names:
-        pd = None
-        if lc_disks:
-            pd = lc_disks[0]
-        elif persistent_boot_disk:
-            try:
-                pd = gce.create_volume(None, "%s" % name, image=lc_image)
-            except ResourceExistsError:
-                pd = gce.ex_get_volume("%s" % name, lc_zone)
-        inst = None
-        try:
-            inst = gce.create_node(name, lc_machine_type, lc_image,
-                    location=lc_zone, ex_network=network, ex_tags=tags,
-                    ex_metadata=metadata, ex_boot_disk=pd, ex_can_ip_forward=ip_forward,
-                    external_ip=external_ip, ex_disk_auto_delete=disk_auto_delete)
-            changed = True
-        except ResourceExistsError:
-            inst = gce.ex_get_node(name, lc_zone)
-        except GoogleBaseError, e:
-            module.fail_json(msg='Unexpected error attempting to create ' + \
-                    'instance %s, error: %s' % (name, e.value))
-
-        for i, lc_disk in enumerate(lc_disks):
-            # Check whether the disk is already attached
-            if (len(inst.extra['disks']) > i):
-                attached_disk = inst.extra['disks'][i]
-                if attached_disk['source'] != lc_disk.extra['selfLink']:
-                    module.fail_json(
-                        msg=("Disk at index %d does not match: requested=%s found=%s" % (
-                            i, lc_disk.extra['selfLink'], attached_disk['source'])))
-                elif attached_disk['mode'] != disk_modes[i]:
-                    module.fail_json(
-                        msg=("Disk at index %d is in the wrong mode: requested=%s found=%s" % (
-                            i, disk_modes[i], attached_disk['mode'])))
-                else:
-                    continue
-            gce.attach_volume(inst, lc_disk, ex_mode=disk_modes[i])
-            # Work around libcloud bug: attached volumes don't get added
-            # to the instance metadata. get_instance_info() only cares about
-            # source and index.
-            if len(inst.extra['disks']) != i+1:
-                inst.extra['disks'].append(
-                    {'source': lc_disk.extra['selfLink'], 'index': i})
-
-        if inst:
-            new_instances.append(inst)
-
-    instance_names = []
-    instance_json_data = []
-    for inst in new_instances:
-        d = get_instance_info(inst)
-        instance_names.append(d['name'])
-        instance_json_data.append(d)
-
-    return (changed, instance_json_data, instance_names)
-
-
-def terminate_instances(module, gce, instance_names, zone_name):
-    """Terminates a list of instances.
-
-    module: Ansible module object
-    gce: authenticated GCE connection object
-    instance_names: a list of instance names to terminate
-    zone_name: the zone where the instances reside prior to termination
-
-    Returns a dictionary of instance names that were terminated.
-
-    """
-    changed = False
-    terminated_instance_names = []
-    for name in instance_names:
-        inst = None
-        try:
-            inst = gce.ex_get_node(name, zone_name)
-        except ResourceNotFoundError:
-            pass
-        except Exception, e:
-            module.fail_json(msg=unexpected_error_msg(e), changed=False)
-        if inst:
-            gce.destroy_node(inst)
-            terminated_instance_names.append(inst.name)
-            changed = True
-
-    return (changed, terminated_instance_names)
 
 def main():
     module = AnsibleModule(
