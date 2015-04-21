@@ -83,12 +83,6 @@ options:
     required: false
     default: "default"
     aliases: []
-  persistent_boot_disk:
-    description:
-      - if set, create the instance with a persistent boot disk
-    required: false
-    default: "false"
-    aliases: []
   disks:
     description:
       - a list of persistent disks to attach to the instance; a string value gives the name of the disk; alternatively, a dictionary value can define 'name' and 'mode' ('READ_ONLY' or 'READ_WRITE'). The first entry will be the boot disk (which must be READ_WRITE).
@@ -129,35 +123,86 @@ options:
     required: false
     default: "ephemeral"
     aliases: []
-  disk_auto_delete:
+  boot_disk:
+    version_added: "2.0"
+    description:
+      - if set, the name to use for the boot disk
+    required: false
+    default: null
+    aliases: []
+  boot_disk_size:
+    version_added: "2.0"
+    description:
+      - if set, the size to use in GB for the boot disk
+    required: false
+    default: null
+    aliases: []
+  boot_disk_type:
+    version_added: "2.0"
+    description:
+      - if set boot disk type (pd-ssd, pd-standard)
+    required: false
+    default: "pd-standard"
+    aliases: []
+  boot_disk_use_existing:
+    version_added: "2.0"
+    description:
+      - if set, attempt to use an existing disk instead of creating a new disk
+    required: false
+    default: "true"
+    aliases: []
+  boot_disk_auto_delete:
     version_added: "1.9"
     description:
       - if set boot disk will be removed after instance destruction
     required: false
     default: "true"
-    aliases: []
+    aliases: [disk_auto_delete]
 
 requirements: [ "libcloud" ]
 notes:
   - Either I(name) or I(instance_names) is required.
+  - I(disks) cannot be specified with the following parameters:
+    I(boot_disk), I(boot_disk_auto_delete), I(boot_disk_size),
+    I(boot_disk_type), I(boot_disk_use_existing)
 author: Eric Johnson <erjohnso@google.com>
 '''
 
 EXAMPLES = '''
 # Basic provisioning example.  Create a single Debian 7 instance in the
 # us-central1-a Zone of n1-standard-1 machine type.
-- local_action:
-    gce:
+- hosts: localhost
+  tasks:
+  - gce:
       name: test-instance
       zone: us-central1-a
       machine_type: n1-standard-1
       image: debian-7
 
 # Example using defaults and with metadata to create a single 'foo' instance
-- local_action:
-    gce:
+- hosts: localhost
+  tasks:
+  - gce:
       name: foo
       metadata: '{"db":"postgres", "group":"qa", "id":500}'
+
+# Example using disks param to specify a persistent ssd root disk and an
+# additional ephemeral disk
+- hosts: localhost
+  tasks:
+  - gce:
+      name: foo_with_ephemeral
+      disks:
+      - type: PERSISTENT
+        initializeParams:
+          sourceImage: centos-7
+          diskType: pd-ssd
+        autoDelete: true
+        boot: yes
+      - type: SCRATCH
+        initializeParams:
+          diskType: local-ssd
+        autoDelete: true
 
 
 # Launch instances from a control node, runs some tasks on the new instances,
@@ -172,12 +217,25 @@ EXAMPLES = '''
     service_account_email: unique-email@developer.gserviceaccount.com
     pem_file: /path/to/pem_file
     project_id: project-id
+    boot_disk: my_boot_disk
+    boot_disk_auto_delete: no
+    boot_disk_type: pd-ssd
   tasks:
     - name: Launch instances
       gce: instance_names={{names}} machine_type={{machine_type}}
-           image={{image}} zone={{zone}} service_account_email={{ service_account_email }}
+           image={{image}} zone={{zone}}
+           service_account_email={{ service_account_email }}
            pem_file={{ pem_file }} project_id={{ project_id }}
+           boot_disk={{ boot_disk }}
+           boot_disk_auto_delete={{ boot_disk_auto_delete }}
+           boot_disk_type={{ boot_disk_type }}
       register: gce
+    - name: Add gce hosts to launched group
+      add_host:
+        name: "{{ item.name }}"
+        groups: launched
+        ansible_ssh_hosts: "{{ item.public_ip }}"
+      with_items: gce_instance_data
     - name: Wait for SSH to come up
       wait_for: host={{item.public_ip}} port=22 delay=10
                 timeout=60 state=started
@@ -327,9 +385,16 @@ class GCENodeManager(object):
                         lc_image = self.get_image(disk['initializeParams']['sourceImage'])
                         disk['initializeParams']['sourceImage'] = lc_image.extra['selfLink']
                     if 'diskType' in disk['initializeParams']:
-                        lc_disktype = self.get_disktype(disk['initializeParams']['diskType'],
-                                                        zone)
-                        disk['initializeParams']['diskType'] = lc_disktype.extra['selfLink']
+                        disk_type = disk['initializeParams']['diskType']
+
+                        # TODO: troubleshoot why ex_get_disktype is returning an error
+                        #lc_disktype = self.get_disktype(disk['initializeParams']['diskType'], zone)
+
+                        # Workaround for ex_get_disktype not returning a valid value
+                        if '/' not in disk_type:
+                            project = self.gce.ex_get_project().name
+                            disk_type = "projects/%s/zones/%s/diskTypes/%s" % (project, zone.name, disk_type)
+                        disk['initializeParams']['diskType'] = disk_type
 
     def execute(self):
         state = self.module.params.get('state')
@@ -585,11 +650,10 @@ def main():
             machine_type = dict(default='n1-standard-1'),
             metadata = dict(),
             name = dict(),
-            count = dict(type='int'), # TODO: implment and document
             network = dict(default='default'),
-            disks = dict(type='list'), # TODO: update docs for this param
+            disks = dict(type='list'),
             state = dict(choices=['active', 'present', 'absent', 'deleted'],
-                    default='present'), # TODO: update docs for this param
+                    default='present'),
             tags = dict(type='list'),
             zone = dict(default='us-central1-a'),
             service_account_email = dict(),
@@ -598,13 +662,14 @@ def main():
             ip_forward = dict(type='bool', default=False),
             external_ip = dict(choices=['ephemeral', 'none'],
                     default='ephemeral'),
-            boot_disk = dict(), # TODO: update docs for this param
-            boot_disk_size = dict(), # TODO: update docs for this param
+            boot_disk = dict(),
+            boot_disk_size = dict(),
             boot_disk_auto_delete = dict(type='bool', default=True,
                     aliases=['disk_auto_delete']),
             boot_disk_type = dict(choices=['pd-standard', 'pd-ssd'],
-                    default='pd-standard'), # TODO: update docs for this param
-            boot_disk_use_existing = dict(type='bool', default=True), # TODO: update docs for this param
+                    default='pd-standard'),
+            boot_disk_use_existing = dict(type='bool', default=True),
+            count = dict(type='int'), # TODO: implment and document
             nics = dict(type='list') # TODO: update docs for this param
         ),
         mutually_exclusive = [
