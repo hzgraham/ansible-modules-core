@@ -85,7 +85,12 @@ options:
     aliases: []
   disks:
     description:
-      - a list of persistent disks to attach to the instance; a string value gives the name of the disk; alternatively, a dictionary value can define 'name' and 'mode' ('READ_ONLY' or 'READ_WRITE'). The first entry will be the boot disk (which must be READ_WRITE).
+      - a list of disks to attach to the instance. The format is a list of
+        dicts as described in the GCE reference docs
+        (https://cloud.google.com/compute/docs/reference/latest/instances#resource).
+        Prior to 2.0 this parameter was required to be a list of strings or a
+        list of dicts consisting of a name and mode. These values are still
+        accepted, but are converted internally to the new format.
     required: false
     default: null
     aliases: []
@@ -377,6 +382,42 @@ class GCENodeManager(object):
             metadata = {'items': items}
         return metadata
 
+    # Convert pre-2.0 disks param to 2.0+ disks format
+    def convert_legacy_disks_param(self, disks, lc_image):
+        if disks is not None:
+            for i, disk in enumerate(disks or []):
+                disk_name = None
+                disk_mode = None
+                if isinstance(disk, str):
+                    disk_name = disk
+                    disk_mode = 'READ_WRITE' if i==0 else 'READ_ONLY'
+
+                elif isinstance(disk, dict):
+                    if len(disk) == 2 and 'name' in disk and 'mode' in disk:
+                        disk_name = disk['name']
+                        disk_mode = disk['mode']
+
+                if disk_name is not None and disk_mode is not None:
+                    try:
+                        lc_disk = self.gce.ex_get_volume(disk_name)
+                        new_disk = { 'source': lc_disk.extra['selfLink'],
+                                     'mode': disk_mode }
+                        if i == 0:
+                            new_disk['boot'] = True
+
+                        disks[i] = new_disk
+                    except ResourceNotFoundError as ex:
+                        self.module.fail_json(
+                            msg="The disk named %s was not found." % disk_name,
+                            changed=False
+                        )
+                else:
+                    self.module.fail_json(
+                        msg="invalid value found in disks parameter",
+                        changed=False
+                    )
+
+
     def expand_disk_partial_names(self, disks, zone):
         if disks is not None:
             for disk in disks:
@@ -509,11 +550,8 @@ class GCENodeManager(object):
                                 lc_zone, metadata):
         changed = False
 
-        # TODO: Convert old style disk arrays to a valid ex_disks_gce_struct
-        #       - array of names
-        #       - array of dicts: { 'name': <name>, 'mode': <mode> }
-
         disks = self.module.params.get('disks')
+        self.convert_legacy_disks_param(disks, lc_image)
         self.expand_disk_partial_names(disks, lc_zone)
         boot_disk = self.module.params.get('boot_disk')
         boot_disk_auto_delete = self.module.params.get('boot_disk_auto_delete')
