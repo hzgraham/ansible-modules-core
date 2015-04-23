@@ -564,7 +564,6 @@ class GCENodeManager(object):
                                           boot_disk_type,
                                           boot_disk_use_existing)
         tags = self.module.params.get('tags')
-        nics = self.module.params.get('nics')
         ip_forward = self.module.params.get('ip_forward')
         external_ip = self.module.params.get('external_ip')
         if external_ip == 'none':
@@ -578,8 +577,7 @@ class GCENodeManager(object):
                 use_existing_disk=boot_disk_use_existing,
                 external_ip=external_ip, ex_disk_type=boot_disk_type,
                 ex_disk_auto_delete=boot_disk_auto_delete,
-                ex_can_ip_forward=ip_forward, ex_disks_gce_struct=disks,
-                ex_nic_gce_struct=nics
+                ex_can_ip_forward=ip_forward, ex_disks_gce_struct=disks
             )
             changed = True
         except ResourceExistsError:
@@ -708,7 +706,6 @@ def main():
                     default='pd-standard'),
             boot_disk_use_existing = dict(type='bool', default=True),
             count = dict(type='int'), # TODO: implment and document
-            nics = dict(type='list') # TODO: update docs for this param
         ),
         mutually_exclusive = [
             ['name', 'instance_names'],
@@ -718,9 +715,7 @@ def main():
             ['disks', 'boot_disk_type'],
             ['disks', 'boot_disk_use_existing'],
             ['count', 'instance_names'],
-            ['count', 'boot_disk'],
-            ['nics', 'external_ip'],
-            ['nics', 'network']
+            ['count', 'boot_disk']
         ],
         required_one_of = [['name', 'instance_names']],
     )
