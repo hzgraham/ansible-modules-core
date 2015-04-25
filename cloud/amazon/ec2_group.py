@@ -402,7 +402,7 @@ def main():
                                 src_group_id=grantGroup,
                                 cidr_ip=ip)
                     changed = True
-        elif vpc_id and not module.check_mode:
+        elif (vpc_id or group.vpc_id) and not module.check_mode:
             # when using a vpc, but no egress rules are specified,
             # we add in a default allow all out rule, which was the
             # default behavior before egress rules were added
