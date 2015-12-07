@@ -40,7 +40,7 @@ def main():
         name                            = dict(required=True),
         state                           = dict(default='present', choices=['absent', 'present']),
     )
-    module_kwargs = openstack_module_kwargs(
+    module_kwargs = kubernetes_module_kwargs(
         mutually_exclusive=[],
         required_together=[],
         required_one_of=[]
