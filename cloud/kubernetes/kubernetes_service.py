@@ -86,8 +86,6 @@ def main():
 
         if state == 'present':
             if service is not None:
-                kube_client.update_service(name=name, selector=selector, ports=ports)
-                changed = True
                 module.exit_json(changed=changed, name=name)
             else:
                 kube_client.create_service(name=name, selector=selector, ports=ports)

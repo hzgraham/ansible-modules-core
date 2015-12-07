@@ -77,8 +77,6 @@ def main():
 
     if state == 'present':
         if pod is not None:
-            kube_client.update_pod(name=name, containers=containers)
-            changed = True
             module.exit_json(changed=changed, name=name, containers=containers)
         else:
             kube_client.create_pod(name=name, containers=containers)
