@@ -46,9 +46,9 @@ kubernetes_pod:
   name: nginx
   containers:
   - name: nginx
-   image: nginx
-   ports:
-   - containerPort: 8080
+    image: nginx
+    ports:
+    - containerPort: 8080
 
 '''
 
