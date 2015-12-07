@@ -26,13 +26,30 @@ author: "Jason DeTiberus <jdetiber@redhat.com>"
 description:
    - Create, Delete or Modify a Kubernetes Pod
 options:
-   TODO
+   name:
+     description:
+        - Name that will be given to the pod (metadata.name)
+     required: true
+     default: None
+   containers:
+     description:
+        - List of containers specifying name, image and other options.
+     required: false
+     default: []
 requirements:
    TODO
 '''
 
 EXAMPLES = '''
-TODO
+
+kubernetes_pod:
+  name: nginx
+  containers:
+  - name: nginx
+   image: nginx
+   ports:
+   - containerPort: 8080
+
 '''
 
 def main():

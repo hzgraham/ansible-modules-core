@@ -26,13 +26,36 @@ author: "Andrew Butcher <abutcher@redhat.com>"
 description:
    - Create, Delete or Modify a Kubernetes Service
 options:
-   TODO
+   name:
+     description:
+        - Name that will be given to the service (metadata.name)
+     required: true
+     default: None
+   selector:
+     description:
+        - A dictionary representing a key, value pair.
+     required: false
+     default: {}
+  ports:
+     description:
+        - A list of ports specifying protocol, port and targetPort.
+     required: false
+     default: []
 requirements:
    TODO
 '''
 
 EXAMPLES = '''
-TODO
+
+kubernetes_service:
+  name: nginx
+  selector:
+    name: nginx
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8080
+
 '''
 
 def main():
