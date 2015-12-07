@@ -96,8 +96,8 @@ def main():
                 kube_client.delete_service(name)
                 changed = True
                 module.exit_json(changed=changed, name=name)
-    except Exception as e:
-        module.fail_json(msg=str(e))
+            else:
+                module.exit_json(changed=changed, name=name)
 
 # this is magic, see lib/ansible/module_common.py
 from ansible.module_utils.basic import *
