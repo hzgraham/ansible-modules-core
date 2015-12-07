@@ -36,6 +36,11 @@ options:
         - List of containers specifying name, image and other options.
      required: false
      default: []
+   labels:
+     description:
+        - A dictionary representing key, value pairs.
+     required: false
+     default: {}
    replicas:
      description:
         - The number of replicas to maintain
@@ -59,9 +64,11 @@ kubernetes_replication_controller:
     image: nginx
     ports:
     - containerPort: 8080
+  labels:
+    app: frontend
   replicas: 1
   selector:
-    name: nginx
+    app: frontend
 
 '''
 
@@ -70,6 +77,7 @@ def main():
         name                            = dict(required=True),
         state                           = dict(default='present', choices=['absent', 'present']),
         containers                      = dict(default=[]),
+        labels                          = dict(default={}),
         replicas                        = dict(default=1),
         selector                        = dict(default={}),
     )
@@ -86,6 +94,7 @@ def main():
         state = module.params['state']
         name = module.params['name']
         containers = module.params['containers']
+        labels = module.params['labels']
         replicas = module.params['replicas']
         selector = module.params['selector']
 
@@ -103,12 +112,14 @@ def main():
             else:
                 kube_client.create_replication_controller(name=name,
                                                           containers=containers,
+                                                          labels=labels,
                                                           replicas=replicas,
                                                           selector=selector)
                 changed = True
                 module.exit_json(changed=changed,
                                  name=name,
                                  containers=containers,
+                                 labels=labels,
                                  replicas=replicas,
                                  selector=selector)
         elif state == 'absent':
