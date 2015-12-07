@@ -19,12 +19,12 @@
 
 DOCUMENTATION = '''
 ---
-module: kubernetes_pod
-short_description: Create, Delete or Modify a Kubernetes Pod
+module: kubernetes_service
+short_description: Create, Delete or Modify a Kubernetes Service
 version_added: "2.0"
-author: "Jason DeTiberus <jdetiber@redhat.com>"
+author: "Andrew Butcher <abutcher@redhat.com>"
 description:
-   - Create, Delete or Modify a Kubernetes Pod
+   - Create, Delete or Modify a Kubernetes Service
 options:
    TODO
 requirements:
@@ -39,7 +39,8 @@ def main():
     argument_spec = kubernetes_argument_spec(
         name                            = dict(required=True),
         state                           = dict(default='present', choices=['absent', 'present']),
-        containers                      = dict(default=[]),
+        selector                        = dict(default={}),
+        ports                           = dict(default=[])
     )
     module_kwargs = kubernetes_module_kwargs(
         mutually_exclusive=[],
@@ -53,24 +54,25 @@ def main():
 
         state = module.params['state']
         name = module.params['name']
-        containers = module.params['containers']
+        selector = module.params['selector']
+        ports = module.params['ports']
 
-        pod = kube_client.get_pod(name)
+        service = kube_client.get_service(name)
 
         changed = False
 
         if state == 'present':
-            if pod is not None:
-                kube_client.update_pod(name=name, containers=containers)
+            if service is not None:
+                kube_client.update_service(name=name, selector=selector, ports=ports)
                 changed = True
-                module.exit_json(changed=changed, name=name, containers=containers)
+                module.exit_json(changed=changed, name=name)
             else:
-                kube_client.create_pod(name=name, containers=containers)
+                kube_client.create_service(name=name, selector=selector, ports=ports)
                 changed = True
-                module.exit_json(changed=changed, name=name, containers=containers)
+                module.exit_json(changed=changed, name=name)
         elif state == 'absent':
-            if pod is not None:
-                kube_client.delete_pod(name)
+            if service is not None:
+                kube_client.delete_service(name)
                 changed = True
                 module.exit_json(changed=changed, name=name)
     except Exception as e:
