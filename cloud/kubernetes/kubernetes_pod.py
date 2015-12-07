@@ -65,31 +65,30 @@ def main():
     )
     module = AnsibleModule(argument_spec, **module_kwargs)
 
-    try:
-        kube_client = KubernetesClient(module)
+    kube_client = KubernetesClient(module)
 
-        state = module.params['state']
-        name = module.params['name']
-        containers = module.params['containers']
+    state = module.params['state']
+    name = module.params['name']
+    containers = module.params['containers']
 
-        pod = kube_client.get_pod(name)
+    pod = kube_client.get_pod(name)
 
-        changed = False
+    changed = False
 
-        if state == 'present':
-            if pod is not None:
-                kube_client.update_pod(name=name, containers=containers)
-                changed = True
-                module.exit_json(changed=changed, name=name, containers=containers)
-            else:
-                kube_client.create_pod(name=name, containers=containers)
-                changed = True
-                module.exit_json(changed=changed, name=name, containers=containers)
-        elif state == 'absent':
-            if pod is not None:
-                kube_client.delete_pod(name)
-                changed = True
-                module.exit_json(changed=changed, name=name)
+    if state == 'present':
+        if pod is not None:
+            kube_client.update_pod(name=name, containers=containers)
+            changed = True
+            module.exit_json(changed=changed, name=name, containers=containers)
+        else:
+            kube_client.create_pod(name=name, containers=containers)
+            changed = True
+            module.exit_json(changed=changed, name=name, containers=containers)
+    elif state == 'absent':
+        if pod is not None:
+            kube_client.delete_pod(name)
+            changed = True
+            module.exit_json(changed=changed, name=name)
 
 # this is magic, see lib/ansible/module_common.py
 from ansible.module_utils.basic import *
