@@ -40,28 +40,39 @@ def main():
         name                            = dict(required=True),
         state                           = dict(default='present', choices=['absent', 'present']),
     )
-    module_kwargs = openstack_module_kwargs(
+    module_kwargs = kubernetes_module_kwargs(
         mutually_exclusive=[],
         required_together=[],
         required_one_of=[]
     )
     module = AnsibleModule(argument_spec, **module_kwargs)
 
-    kube_client = KubernetesClient(module)
+    try:
+        kube_client = KubernetesClient(module)
 
-    state = module.params['state']
-    pod_name = module.params['name']
+        state = module.params['state']
+        pod_name = module.params['name']
 
-    pod = kube_client.get_pod(pod_name)
+        pod = kube_client.get_pod(pod_name)
 
-    if state == 'present':
-        if pod is not None:
-            kube_client.update_pod(pod_name)
-        else:
-            kube_client.create_pod(pod_name)
-    elif state == 'absent':
-        if pod is not None:
-            kube_client.delete_pod(pod_name)
+        changed = False
+
+        if state == 'present':
+            if pod is not None:
+                kube_client.update_pod(pod_name)
+                changed = True
+                module.exit_json(changed=changed, name=pod_name)
+            else:
+                kube_client.create_pod(pod_name)
+                changed = True
+                module.exit_json(changed=changed, name=pod_name)
+        elif state == 'absent':
+            if pod is not None:
+                kube_client.delete_pod(pod_name)
+                changed = True
+                module.exit_json(changed=changed, name=pod_name)
+    except Exception as e:
+        module.fail_json(msg=str(e))
 
 # this is magic, see lib/ansible/module_common.py
 from ansible.module_utils.basic import *
