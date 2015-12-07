@@ -72,32 +72,31 @@ def main():
     )
     module = AnsibleModule(argument_spec, **module_kwargs)
 
-    try:
-        kube_client = KubernetesClient(module)
+    kube_client = KubernetesClient(module)
 
-        state = module.params['state']
-        name = module.params['name']
-        selector = module.params['selector']
-        ports = module.params['ports']
+    state = module.params['state']
+    name = module.params['name']
+    selector = module.params['selector']
+    ports = module.params['ports']
 
-        service = kube_client.get_service(name)
+    service = kube_client.get_service(name)
 
-        changed = False
+    changed = False
 
-        if state == 'present':
-            if service is not None:
-                module.exit_json(changed=changed, name=name)
-            else:
-                kube_client.create_service(name=name, selector=selector, ports=ports)
-                changed = True
-                module.exit_json(changed=changed, name=name)
-        elif state == 'absent':
-            if service is not None:
-                kube_client.delete_service(name)
-                changed = True
-                module.exit_json(changed=changed, name=name)
-            else:
-                module.exit_json(changed=changed, name=name)
+    if state == 'present':
+        if service is not None:
+            module.exit_json(changed=changed, name=name)
+        else:
+            kube_client.create_service(name=name, selector=selector, ports=ports)
+            changed = True
+            module.exit_json(changed=changed, name=name)
+    elif state == 'absent':
+        if service is not None:
+            kube_client.delete_service(name)
+            changed = True
+            module.exit_json(changed=changed, name=name)
+        else:
+            module.exit_json(changed=changed, name=name)
 
 # this is magic, see lib/ansible/module_common.py
 from ansible.module_utils.basic import *

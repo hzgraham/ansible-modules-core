@@ -88,47 +88,46 @@ def main():
     )
     module = AnsibleModule(argument_spec, **module_kwargs)
 
-    try:
-        kube_client = KubernetesClient(module)
+    kube_client = KubernetesClient(module)
 
-        state = module.params['state']
-        name = module.params['name']
-        containers = module.params['containers']
-        labels = module.params['labels']
-        replicas = module.params['replicas']
-        selector = module.params['selector']
+    state = module.params['state']
+    name = module.params['name']
+    containers = module.params['containers']
+    labels = module.params['labels']
+    replicas = module.params['replicas']
+    selector = module.params['selector']
 
-        replication_controller = kube_client.get_replication_controller(name)
+    replication_controller = kube_client.get_replication_controller(name)
 
-        changed = False
+    changed = False
 
-        if state == 'present':
-            if replication_controller is not None:
-                module.exit_json(changed=changed,
-                                 name=name,
-                                 containers=containers,
-                                 replicas=replicas,
-                                 selector=selector)
-            else:
-                kube_client.create_replication_controller(name=name,
-                                                          containers=containers,
-                                                          labels=labels,
-                                                          replicas=replicas,
-                                                          selector=selector)
-                changed = True
-                module.exit_json(changed=changed,
-                                 name=name,
-                                 containers=containers,
-                                 labels=labels,
-                                 replicas=replicas,
-                                 selector=selector)
-        elif state == 'absent':
-            if pod is not None:
-                kube_client.delete_replication_controller(name)
-                changed = True
-                module.exit_json(changed=changed, name=name)
-            else:
-                module.exit_json(changed=changed, name=name)
+    if state == 'present':
+        if replication_controller is not None:
+            module.exit_json(changed=changed,
+                             name=name,
+                             containers=containers,
+                             replicas=replicas,
+                             selector=selector)
+        else:
+            kube_client.create_replication_controller(name=name,
+                                                      containers=containers,
+                                                      labels=labels,
+                                                      replicas=replicas,
+                                                      selector=selector)
+            changed = True
+            module.exit_json(changed=changed,
+                             name=name,
+                             containers=containers,
+                             labels=labels,
+                             replicas=replicas,
+                             selector=selector)
+    elif state == 'absent':
+        if pod is not None:
+            kube_client.delete_replication_controller(name)
+            changed = True
+            module.exit_json(changed=changed, name=name)
+        else:
+            module.exit_json(changed=changed, name=name)
 
 # this is magic, see lib/ansible/module_common.py
 from ansible.module_utils.basic import *
