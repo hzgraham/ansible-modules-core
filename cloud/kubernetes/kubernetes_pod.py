@@ -57,6 +57,7 @@ def main():
         name                            = dict(required=True),
         state                           = dict(default='present', choices=['absent', 'present']),
         containers                      = dict(default=[]),
+        labels                          = dict(default=[]),
     )
     module_kwargs = kubernetes_module_kwargs(
         mutually_exclusive=[],
@@ -70,6 +71,7 @@ def main():
     state = module.params['state']
     name = module.params['name']
     containers = module.params['containers']
+    labels = module.params['labels']
 
     pod = kube_client.get_pod(name)
 
@@ -77,12 +79,11 @@ def main():
 
     if state == 'present':
         if pod is not None:
-            module.exit_json(changed=changed, name=name, containers=containers)
+            module.exit_json(changed=changed, name=name, containers=containers, labels=labels)
         else:
-            result = kube_client.create_pod(name=name, containers=containers)
+            kube_client.create_pod(name=name, containers=containers, labels=labels)
             changed = True
-            module.exit_json(changed=changed, name=name,
-                             containers=containers, result=result)
+            module.exit_json(changed=changed, name=name, containers=containers, labels=labels)
     elif state == 'absent':
         if pod is not None:
             result = kube_client.delete_pod(name)
