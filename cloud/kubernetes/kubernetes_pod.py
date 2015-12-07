@@ -79,14 +79,15 @@ def main():
         if pod is not None:
             module.exit_json(changed=changed, name=name, containers=containers)
         else:
-            kube_client.create_pod(name=name, containers=containers)
+            result = kube_client.create_pod(name=name, containers=containers)
             changed = True
-            module.exit_json(changed=changed, name=name, containers=containers)
+            module.exit_json(changed=changed, name=name,
+                             containers=containers, result=result)
     elif state == 'absent':
         if pod is not None:
-            kube_client.delete_pod(name)
+            result = kube_client.delete_pod(name)
             changed = True
-            module.exit_json(changed=changed, name=name)
+            module.exit_json(changed=changed, name=name, result=result)
         else:
             module.exit_json(changed=changed, name=name)
 

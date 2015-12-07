@@ -87,14 +87,14 @@ def main():
         if service is not None:
             module.exit_json(changed=changed, name=name)
         else:
-            kube_client.create_service(name=name, selector=selector, ports=ports)
+            result = kube_client.create_service(name=name, selector=selector, ports=ports)
             changed = True
-            module.exit_json(changed=changed, name=name)
+            module.exit_json(changed=changed, name=name, result=result)
     elif state == 'absent':
         if service is not None:
-            kube_client.delete_service(name)
+            result = kube_client.delete_service(name)
             changed = True
-            module.exit_json(changed=changed, name=name)
+            module.exit_json(changed=changed, name=name, result=result)
         else:
             module.exit_json(changed=changed, name=name)
 
