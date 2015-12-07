@@ -101,18 +101,16 @@ def main():
                                  replicas=replicas,
                                  selector=selector)
             else:
-                rc, data = kube_client.create_replication_controller(name=name,
-                                                                     containers=containers,
-                                                                     replicas=replicas,
-                                                                     selector=selector)
+                kube_client.create_replication_controller(name=name,
+                                                          containers=containers,
+                                                          replicas=replicas,
+                                                          selector=selector)
                 changed = True
                 module.exit_json(changed=changed,
                                  name=name,
                                  containers=containers,
                                  replicas=replicas,
-                                 selector=selector,
-                                 rc=rc,
-                                 data=data)
+                                 selector=selector)
         elif state == 'absent':
             if pod is not None:
                 kube_client.delete_replication_controller(name)
